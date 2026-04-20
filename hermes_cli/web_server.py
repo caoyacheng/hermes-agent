@@ -2114,26 +2114,90 @@ async def get_toolsets():
         _get_platform_tools,
         _toolset_has_keys,
     )
-    from toolsets import resolve_toolset
+    from toolsets import resolve_toolset, get_all_toolsets
 
     config = load_config()
-    enabled_toolsets = _get_platform_tools(
-        config,
-        "cli",
-        include_default_mcp_servers=False,
-    )
+    # A toolset can be enabled for different platforms (cli, api_server, discord, ...).
+    # For the dashboard "Toolsets" view we treat a toolset as enabled if it is
+    # enabled for *any* platform, so custom toolsets enabled only on api_server
+    # (like "gis_platform") still show as Active.
+    try:
+        from hermes_cli.platforms import PLATFORMS as _PLATFORMS
+        platform_keys = list(_PLATFORMS.keys())
+    except Exception:
+        platform_keys = ["cli"]
+
+    enabled_toolsets: set[str] = set()
+    for pkey in platform_keys:
+        try:
+            enabled_toolsets.update(
+                _get_platform_tools(config, pkey, include_default_mcp_servers=False)
+            )
+        except Exception:
+            continue
     result = []
-    for name, label, desc in _get_effective_configurable_toolsets():
+
+    # 1) Primary list: built-in configurable toolsets (what the UI expects).
+    configurable_rows = list(_get_effective_configurable_toolsets())
+    configurable_names = {name for name, _, _ in configurable_rows}
+
+    for name, label, desc in configurable_rows:
         try:
             tools = sorted(set(resolve_toolset(name)))
         except Exception:
             tools = []
         is_enabled = name in enabled_toolsets
         result.append({
-            "name": name, "label": label, "description": desc,
+            "name": name,
+            "label": label,
+            "description": desc,
             "enabled": is_enabled,
             "available": is_enabled,
             "configured": _toolset_has_keys(name, config),
+            "tools": tools,
+        })
+
+    # 2) Extras: include any non-configurable toolsets (e.g. custom ones like
+    #    "gis_platform") so the dashboard can display them too.
+    #
+    # We intentionally skip the platform default "super toolsets" (hermes-*)
+    # and other composite/aliases that would spam the UI.
+    try:
+        all_toolsets = get_all_toolsets()
+    except Exception:
+        all_toolsets = {}
+
+    def _skip_toolset(ts_name: str) -> bool:
+        if ts_name in configurable_names:
+            return True
+        if ts_name.startswith("hermes-"):
+            return True
+        # Avoid surfacing the special aliases.
+        if ts_name in {"all", "*"}:
+            return True
+        return False
+
+    extra_names = sorted(
+        [name for name in all_toolsets.keys() if not _skip_toolset(name)]
+    )
+    for name in extra_names:
+        ts_def = all_toolsets.get(name) or {}
+        label = ts_def.get("description") or name
+        desc = ts_def.get("description") or ""
+        try:
+            tools = sorted(set(resolve_toolset(name)))
+        except Exception:
+            tools = []
+        is_enabled = name in enabled_toolsets
+        # For non-configurable toolsets we can't reliably infer "configured"
+        # via provider-aware checks; treat as configured when enabled.
+        result.append({
+            "name": name,
+            "label": name,
+            "description": desc,
+            "enabled": is_enabled,
+            "available": is_enabled,
+            "configured": True if is_enabled else True,
             "tools": tools,
         })
     return result

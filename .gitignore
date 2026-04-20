@@ -32,6 +32,9 @@ data/*
 node_modules/
 browser-use/
 agent-browser/
+
+# macOS
+.DS_Store
 # Private keys
 *.ppk
 *.pem

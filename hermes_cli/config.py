@@ -906,6 +906,7 @@ ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
         "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"],
     10: ["TAVILY_API_KEY"],
     11: ["TERMINAL_MODAL_MODE"],
+    20: ["GIS_API_URL", "GIS_API_TOKEN", "GIS_TOOLS_ALLOW_WRITE", "GIS_ALLOW_ANON"],
 }
 
 # Required environment variables with metadata for migration prompts.
@@ -1361,6 +1362,36 @@ OPTIONAL_ENV_VARS = {
         "tools": ["browser_navigate", "browser_click"],
         "password": False,
         "category": "tool",
+    },
+    "GIS_API_URL": {
+        "description": "GIS platform backend base URL (e.g. http://localhost:8080)",
+        "prompt": "GIS API URL",
+        "url": None,
+        "password": False,
+        "category": "tool",
+    },
+    "GIS_API_TOKEN": {
+        "description": "GIS platform API token (JWT). Required for protected endpoints.",
+        "prompt": "GIS API token (JWT)",
+        "url": None,
+        "password": True,
+        "category": "tool",
+    },
+    "GIS_TOOLS_ALLOW_WRITE": {
+        "description": "Enable GIS write operations (create/update/delete/ack/resolve). Set to 'true' to allow writes.",
+        "prompt": "Allow GIS write operations (true/false)",
+        "url": None,
+        "password": False,
+        "category": "tool",
+        "advanced": True,
+    },
+    "GIS_ALLOW_ANON": {
+        "description": "Allow GIS tools to be exposed without a token (dev only; backend must allow anonymous access).",
+        "prompt": "Allow anonymous GIS access (dev only)",
+        "url": None,
+        "password": False,
+        "category": "tool",
+        "advanced": True,
     },
     "FAL_KEY": {
         "description": "FAL API key for image generation",

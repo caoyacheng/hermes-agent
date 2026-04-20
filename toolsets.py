@@ -201,6 +201,27 @@ TOOLSETS = {
         "includes": []
     },
 
+    "gis_platform": {
+        "description": "GIS platform API tools (pipelines/stations/alarms/stats/topology/audit/inspection)",
+        "tools": [
+            "gis_auth_me",
+            "gis_list_pipelines", "gis_get_pipeline", "gis_list_pipelines_bbox",
+            "gis_create_pipeline", "gis_update_pipeline", "gis_delete_pipeline",
+            "gis_list_stations", "gis_get_station", "gis_list_stations_by_pipe",
+            "gis_create_station", "gis_update_station", "gis_delete_station",
+            "gis_stats_overview",
+            "gis_list_alarms", "gis_get_alarm", "gis_ack_alarm", "gis_resolve_alarm",
+            "gis_list_alarm_rules", "gis_create_alarm_rule", "gis_update_alarm_rule", "gis_delete_alarm_rule",
+            "gis_list_audit_logs", "gis_audit_stats",
+            "gis_list_inspection_plans", "gis_get_inspection_plan",
+            "gis_create_inspection_plan", "gis_update_inspection_plan", "gis_delete_inspection_plan",
+            "gis_list_inspection_records", "gis_get_inspection_record",
+            "gis_create_inspection_record", "gis_update_inspection_record", "gis_delete_inspection_record",
+            "gis_topology_connections", "gis_topology_trace", "gis_topology_shutoff",
+        ],
+        "includes": []
+    },
+
     "feishu_doc": {
         "description": "Read Feishu/Lark document content",
         "tools": ["feishu_doc_read"],
@@ -285,6 +306,21 @@ TOOLSETS = {
             "cronjob",
             # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
             "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+            # GIS platform API tools (gated on GIS_API_TOKEN via check_fn)
+            "gis_auth_me",
+            "gis_list_pipelines", "gis_get_pipeline", "gis_list_pipelines_bbox",
+            "gis_create_pipeline", "gis_update_pipeline", "gis_delete_pipeline",
+            "gis_list_stations", "gis_get_station", "gis_list_stations_by_pipe",
+            "gis_create_station", "gis_update_station", "gis_delete_station",
+            "gis_stats_overview",
+            "gis_list_alarms", "gis_get_alarm", "gis_ack_alarm", "gis_resolve_alarm",
+            "gis_list_alarm_rules", "gis_create_alarm_rule", "gis_update_alarm_rule", "gis_delete_alarm_rule",
+            "gis_list_audit_logs", "gis_audit_stats",
+            "gis_list_inspection_plans", "gis_get_inspection_plan",
+            "gis_create_inspection_plan", "gis_update_inspection_plan", "gis_delete_inspection_plan",
+            "gis_list_inspection_records", "gis_get_inspection_record",
+            "gis_create_inspection_record", "gis_update_inspection_record", "gis_delete_inspection_record",
+            "gis_topology_connections", "gis_topology_trace", "gis_topology_shutoff",
 
         ],
         "includes": []
