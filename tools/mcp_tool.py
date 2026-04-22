@@ -78,6 +78,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -207,6 +208,20 @@ def _build_safe_env(user_env: Optional[dict]) -> dict:
             env[key] = value
     if user_env:
         env.update(user_env)
+
+    # macOS: launchd / GUI apps (and some gateway supervisors) often inherit a
+    # minimal PATH without Homebrew — stdio MCP servers spawned via ``uvx`` or
+    # ``npx`` then fail with "command not found" even though the shell has them.
+    if sys.platform == "darwin":
+        brew_prefixes = ("/opt/homebrew/bin", "/usr/local/bin")
+        raw_path = env.get("PATH") or os.environ.get("PATH", "") or ""
+        parts = [p for p in raw_path.split(os.pathsep) if p]
+        for prefix in reversed(brew_prefixes):
+            if prefix not in parts:
+                parts.insert(0, prefix)
+        if parts:
+            env["PATH"] = os.pathsep.join(parts)
+
     return env
 
 
@@ -2399,8 +2414,17 @@ def register_mcp_servers(servers: Dict[str, dict]) -> List[str]:
                 )
 
     # Per-server timeouts are handled inside _discover_and_register_server.
-    # The outer timeout is generous: 120s total for parallel discovery.
-    _run_on_mcp_loop(_discover_all(), timeout=120)
+    # Outer timeout must cover slow first-time stdio servers (e.g. ``uvx``
+    # downloading wheels + embedding model warmup for mcp-server-qdrant).
+    outer_timeout = 120.0
+    if new_servers:
+        max_connect = max(
+            float(cfg.get("connect_timeout") or _DEFAULT_CONNECT_TIMEOUT)
+            for cfg in new_servers.values()
+        )
+        outer_timeout = min(900.0, max(120.0, max_connect * 3.0 + 90.0))
+
+    _run_on_mcp_loop(_discover_all(), timeout=outer_timeout)
 
     # Log a summary so ACP callers get visibility into what was registered.
     with _lock:

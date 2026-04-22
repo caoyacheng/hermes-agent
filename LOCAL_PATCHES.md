@@ -33,6 +33,24 @@ This repo is periodically synced with upstream. The following changes are **loca
   - Adds `GIS_*` env vars to `OPTIONAL_ENV_VARS` + `ENV_VARS_BY_VERSION` and bumps `_config_version`.
   - This makes setup/doctor/dashboard env pages aware of GIS variables.
 
+### MCP client reliability (stdio servers, Qdrant, etc.)
+
+Upstream keeps `mcp` as an optional extra; this fork makes MCP usable out of the box when `mcp_servers` is configured, and fixes common macOS / first-boot timeouts.
+
+- **`pyproject.toml`**
+  - Adds `mcp>=1.2.0,<2` to **core** `dependencies` (still listed under `[project.optional-dependencies] mcp` for compatibility).
+  - Removes duplicate `mcp` from the `dev` extra (it is now in core).
+
+- **`model_tools.py`**
+  - After MCP discovery: if `mcp_servers` is non-empty but the `mcp` package is missing, logs a **warning** with install instructions.
+
+- **`tools/mcp_tool.py`**
+  - **macOS**: prepends `/opt/homebrew/bin` and `/usr/local/bin` to the subprocess `PATH` so `uvx` / `npx` work when the parent process has a minimal PATH (launchd, some gateway supervisors).
+  - **Discovery timeout**: outer `_run_on_mcp_loop` timeout scales from each server’s `connect_timeout` (cap 900s) so first-time `uvx mcp-server-qdrant` + embedding warmup is less likely to hit a hard 120s wall.
+
+- **`tests/tools/test_mcp_tool.py`**
+  - `TestBuildSafeEnv` uses `monkeypatch` to force `sys.platform == "linux"` for PATH equality assertions (Darwin intentionally mutates PATH).
+
 ### Notes (outside git)
 
 These are runtime/user config changes and won’t be preserved by upstream sync automatically:

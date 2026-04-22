@@ -6,6 +6,7 @@ All tests use mocks -- no real MCP servers or subprocesses are started.
 import asyncio
 import json
 import os
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -863,6 +864,11 @@ class TestShutdown:
 
 class TestBuildSafeEnv:
     """Tests for _build_safe_env() environment filtering."""
+
+    @pytest.fixture(autouse=True)
+    def _linux_platform_for_path(self, monkeypatch):
+        """PATH assertions are exact on Linux; macOS prepends Homebrew bin dirs."""
+        monkeypatch.setattr(sys, "platform", "linux")
 
     def test_only_safe_vars_passed(self):
         """Only safe baseline vars and XDG_* from os.environ are included."""

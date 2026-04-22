@@ -138,6 +138,18 @@ try:
 except Exception as e:
     logger.debug("MCP tool discovery failed: %s", e)
 
+try:
+    from tools import mcp_tool as _mcp_tool_mod
+
+    if _mcp_tool_mod._load_mcp_config() and not _mcp_tool_mod._MCP_AVAILABLE:
+        logger.warning(
+            "config.yaml defines mcp_servers but the Python 'mcp' package is not "
+            "installed in this environment — MCP tools will be unavailable. "
+            "Fix: pip install 'mcp>=1.2,<2' (or reinstall hermes-agent so core deps update)."
+        )
+except Exception:
+    pass
+
 # Plugin tool discovery (user/project/pip plugins)
 try:
     from hermes_cli.plugins import discover_plugins
