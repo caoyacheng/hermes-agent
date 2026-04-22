@@ -784,13 +784,22 @@ GIS_LIST_STATIONS_BY_PIPE_SCHEMA = {
 
 GIS_CREATE_STATION_SCHEMA = {
     "name": "gis_create_station",
-    "description": "Create a station (write). Requires GIS_TOOLS_ALLOW_WRITE=true.",
+    "description": (
+        "Create a station (write). Requires GIS_TOOLS_ALLOW_WRITE=true. "
+        "Body must be a GeoJSON Feature: type=Feature, properties "
+        "{ id, name, stationType, optional bindPipeId|status|installDate|lastCheck|remark|tier|capacity }, "
+        "geometry { type: Point, coordinates: [lng, lat] }. "
+        "Use null or omit bindPipeId when not bound; dates as yyyy-MM-dd or omit (do not send empty strings)."
+    ),
     "parameters": {"type": "object", "properties": {"station": {"type": "object"}}, "required": ["station"]},
 }
 
 GIS_UPDATE_STATION_SCHEMA = {
     "name": "gis_update_station",
-    "description": "Update a station by ID (write). Requires GIS_TOOLS_ALLOW_WRITE=true.",
+    "description": (
+        "Update a station by ID (write). Requires GIS_TOOLS_ALLOW_WRITE=true. "
+        "Same GeoJSON Feature shape as gis_create_station (properties + optional geometry)."
+    ),
     "parameters": {
         "type": "object",
         "properties": {"id": {"type": "string"}, "station": {"type": "object"}},
