@@ -751,6 +751,11 @@ class AIAgent:
         prefill_messages: List[Dict[str, Any]] = None,
         platform: str = None,
         user_id: str = None,
+        user_name: str = None,
+        chat_id: str = None,
+        chat_name: str = None,
+        chat_type: str = None,
+        thread_id: str = None,
         gateway_session_key: str = None,
         skip_context_files: bool = False,
         skip_memory: bool = False,
@@ -820,6 +825,11 @@ class AIAgent:
         self.ephemeral_system_prompt = ephemeral_system_prompt
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
         self._user_id = user_id  # Platform user identifier (gateway sessions)
+        self._user_name = user_name
+        self._chat_id = chat_id
+        self._chat_name = chat_name
+        self._chat_type = chat_type
+        self._thread_id = thread_id
         self._gateway_session_key = gateway_session_key  # Stable per-chat key (e.g. agent:main:telegram:dm:123)
         # Pluggable print function — CLI replaces this with _cprint so that
         # raw ANSI status lines are routed through prompt_toolkit's renderer
@@ -1471,6 +1481,16 @@ class AIAgent:
                         # Thread gateway user identity for per-user memory scoping
                         if self._user_id:
                             _init_kwargs["user_id"] = self._user_id
+                        if self._user_name:
+                            _init_kwargs["user_name"] = self._user_name
+                        if self._chat_id:
+                            _init_kwargs["chat_id"] = self._chat_id
+                        if self._chat_name:
+                            _init_kwargs["chat_name"] = self._chat_name
+                        if self._chat_type:
+                            _init_kwargs["chat_type"] = self._chat_type
+                        if self._thread_id:
+                            _init_kwargs["thread_id"] = self._thread_id
                         # Thread gateway session key for stable per-chat Honcho session isolation
                         if self._gateway_session_key:
                             _init_kwargs["gateway_session_key"] = self._gateway_session_key
@@ -2966,6 +2986,7 @@ class AIAgent:
                     tool_call_id=msg.get("tool_call_id"),
                     finish_reason=msg.get("finish_reason"),
                     reasoning=msg.get("reasoning") if role == "assistant" else None,
+                    reasoning_content=msg.get("reasoning_content") if role == "assistant" else None,
                     reasoning_details=msg.get("reasoning_details") if role == "assistant" else None,
                     codex_reasoning_items=msg.get("codex_reasoning_items") if role == "assistant" else None,
                 )
@@ -5805,22 +5826,129 @@ class AIAgent:
                             result["response"] = _call_chat_completions()
                         return  # success
                     except Exception as e:
-                        if deltas_were_sent["yes"]:
-                            # Streaming failed AFTER some tokens were already
-                            # delivered.  Don't retry or fall back — partial
-                            # content already reached the user.
-                            logger.warning(
-                                "Streaming failed after partial delivery, not retrying: %s", e
-                            )
-                            result["error"] = e
-                            return
-
                         _is_timeout = isinstance(
                             e, (_httpx.ReadTimeout, _httpx.ConnectTimeout, _httpx.PoolTimeout)
                         )
                         _is_conn_err = isinstance(
                             e, (_httpx.ConnectError, _httpx.RemoteProtocolError, ConnectionError)
                         )
+
+                        # If the stream died AFTER some tokens were delivered:
+                        # normally we don't retry (the user already saw text,
+                        # retrying would duplicate it).  BUT: if a tool call
+                        # was in-flight when the stream died, silently aborting
+                        # discards the tool call entirely.  In that case we
+                        # prefer to retry — the user sees a brief
+                        # "reconnecting" marker + duplicated preamble text,
+                        # which is strictly better than a failed action with
+                        # a "retry manually" message.  Limit this to transient
+                        # connection errors (Clawdbot-style narrow gate): no
+                        # tool has executed yet within this API call, so
+                        # silent retry is safe wrt side-effects.
+                        if deltas_were_sent["yes"]:
+                            _partial_tool_in_flight = bool(
+                                result.get("partial_tool_names")
+                            )
+                            _is_sse_conn_err_preview = False
+                            if not _is_timeout and not _is_conn_err:
+                                from openai import APIError as _APIError
+                                if isinstance(e, _APIError) and not getattr(e, "status_code", None):
+                                    _err_lower_preview = str(e).lower()
+                                    _SSE_PREVIEW_PHRASES = (
+                                        "connection lost",
+                                        "connection reset",
+                                        "connection closed",
+                                        "connection terminated",
+                                        "network error",
+                                        "network connection",
+                                        "terminated",
+                                        "peer closed",
+                                        "broken pipe",
+                                        "upstream connect error",
+                                    )
+                                    _is_sse_conn_err_preview = any(
+                                        phrase in _err_lower_preview
+                                        for phrase in _SSE_PREVIEW_PHRASES
+                                    )
+                            _is_transient = (
+                                _is_timeout or _is_conn_err or _is_sse_conn_err_preview
+                            )
+                            _can_silent_retry = (
+                                _partial_tool_in_flight
+                                and _is_transient
+                                and _stream_attempt < _max_stream_retries
+                            )
+                            if not _can_silent_retry:
+                                # Either no tool call was in-flight (so the
+                                # turn was a pure text response — current
+                                # stub-with-recovered-text behaviour is
+                                # correct), or retries are exhausted, or the
+                                # error isn't transient.  Fall through to the
+                                # stub path.
+                                logger.warning(
+                                    "Streaming failed after partial delivery, not retrying: %s", e
+                                )
+                                result["error"] = e
+                                return
+                            # Tool call was in-flight AND error is transient:
+                            # retry silently.  Clear per-attempt state so the
+                            # next stream starts clean.  Fire a "reconnecting"
+                            # marker so the user sees why the preamble is
+                            # about to be re-streamed.
+                            logger.info(
+                                "Streaming attempt %s/%s died mid tool-call "
+                                "(%s: %s) after user-visible text; retrying "
+                                "silently to avoid losing the action. "
+                                "Preamble will re-stream.",
+                                _stream_attempt + 1,
+                                _max_stream_retries + 1,
+                                type(e).__name__,
+                                e,
+                            )
+                            try:
+                                self._fire_stream_delta(
+                                    "\n\n⚠ Connection dropped mid tool-call; "
+                                    "reconnecting…\n\n"
+                                )
+                            except Exception:
+                                pass
+                            # Reset the streamed-text buffer so the retry's
+                            # fresh preamble doesn't get double-recorded in
+                            # _current_streamed_assistant_text (which would
+                            # pollute the interim-visible-text comparison).
+                            try:
+                                self._reset_stream_delivery_tracking()
+                            except Exception:
+                                pass
+                            # Reset in-memory accumulators so the next
+                            # attempt's chunks don't concat onto the dead
+                            # stream's partial JSON.
+                            result["partial_tool_names"] = []
+                            deltas_were_sent["yes"] = False
+                            first_delta_fired["done"] = False
+                            self._emit_status(
+                                f"⚠️ Connection dropped mid tool-call "
+                                f"({type(e).__name__}). Reconnecting… "
+                                f"(attempt {_stream_attempt + 2}/{_max_stream_retries + 1})"
+                            )
+                            self._touch_activity(
+                                f"stream retry {_stream_attempt + 2}/{_max_stream_retries + 1} "
+                                f"mid tool-call after {type(e).__name__}"
+                            )
+                            stale = request_client_holder.get("client")
+                            if stale is not None:
+                                self._close_request_openai_client(
+                                    stale, reason="stream_mid_tool_retry_cleanup"
+                                )
+                                request_client_holder["client"] = None
+                            try:
+                                self._replace_primary_openai_client(
+                                    reason="stream_mid_tool_retry_pool_cleanup"
+                                )
+                            except Exception:
+                                pass
+                            self._emit_status("🔄 Reconnected — resuming…")
+                            continue
 
                         # SSE error events from proxies (e.g. OpenRouter sends
                         # {"error":{"message":"Network connection lost."}}) are
@@ -6132,6 +6260,10 @@ class AIAgent:
             # falling through to OpenRouter defaults.
             fb_base_url_hint = (fb.get("base_url") or "").strip() or None
             fb_api_key_hint = (fb.get("api_key") or "").strip() or None
+            if not fb_api_key_hint:
+                fb_key_env = (fb.get("key_env") or "").strip()
+                if fb_key_env:
+                    fb_api_key_hint = os.getenv(fb_key_env, "").strip() or None
             # For Ollama Cloud endpoints, pull OLLAMA_API_KEY from env
             # when no explicit key is in the fallback config. Host match
             # (not substring) — see GHSA-76xc-57q6-vm5m.
@@ -7003,6 +7135,11 @@ class AIAgent:
             "finish_reason": finish_reason,
         }
 
+        if hasattr(assistant_message, "reasoning_content"):
+            raw_reasoning_content = getattr(assistant_message, "reasoning_content", None)
+            if raw_reasoning_content is not None:
+                msg["reasoning_content"] = _sanitize_surrogates(raw_reasoning_content)
+
         if hasattr(assistant_message, 'reasoning_details') and assistant_message.reasoning_details:
             # Pass reasoning_details back unmodified so providers (OpenRouter,
             # Anthropic, OpenAI) can maintain reasoning continuity across turns.
@@ -7076,6 +7213,30 @@ class AIAgent:
             msg["tool_calls"] = tool_calls
 
         return msg
+
+    def _copy_reasoning_content_for_api(self, source_msg: dict, api_msg: dict) -> None:
+        """Copy provider-facing reasoning fields onto an API replay message."""
+        if source_msg.get("role") != "assistant":
+            return
+
+        explicit_reasoning = source_msg.get("reasoning_content")
+        if isinstance(explicit_reasoning, str):
+            api_msg["reasoning_content"] = explicit_reasoning
+            return
+
+        normalized_reasoning = source_msg.get("reasoning")
+        if isinstance(normalized_reasoning, str) and normalized_reasoning:
+            api_msg["reasoning_content"] = normalized_reasoning
+            return
+
+        kimi_requires_reasoning = (
+            self.provider in {"kimi-coding", "kimi-coding-cn"}
+            or base_url_host_matches(self.base_url, "api.kimi.com")
+            or base_url_host_matches(self.base_url, "moonshot.ai")
+            or base_url_host_matches(self.base_url, "moonshot.cn")
+        )
+        if kimi_requires_reasoning and source_msg.get("tool_calls"):
+            api_msg["reasoning_content"] = ""
 
     @staticmethod
     def _sanitize_tool_calls_for_strict_api(api_msg: dict) -> dict:
@@ -7160,10 +7321,7 @@ class AIAgent:
             api_messages = []
             for msg in messages:
                 api_msg = msg.copy()
-                if msg.get("role") == "assistant":
-                    reasoning = msg.get("reasoning")
-                    if reasoning:
-                        api_msg["reasoning_content"] = reasoning
+                self._copy_reasoning_content_for_api(msg, api_msg)
                 api_msg.pop("reasoning", None)
                 api_msg.pop("finish_reason", None)
                 api_msg.pop("_flush_sentinel", None)
@@ -8923,11 +9081,7 @@ class AIAgent:
 
                 # For ALL assistant messages, pass reasoning back to the API
                 # This ensures multi-turn reasoning context is preserved
-                if msg.get("role") == "assistant":
-                    reasoning_text = msg.get("reasoning")
-                    if reasoning_text:
-                        # Add reasoning_content for API compatibility (Moonshot AI, Novita, OpenRouter)
-                        api_msg["reasoning_content"] = reasoning_text
+                self._copy_reasoning_content_for_api(msg, api_msg)
 
                 # Remove 'reasoning' field - it's for trajectory storage only
                 # We've copied it to 'reasoning_content' for the API above
@@ -9724,6 +9878,7 @@ class AIAgent:
                                     billing_mode="subscription_included"
                                     if cost_result.status == "included" else None,
                                     model=self.model,
+                                    api_call_count=1,
                                 )
                             except Exception:
                                 pass  # never block the agent loop
@@ -10000,6 +10155,27 @@ class AIAgent:
                         if self._try_refresh_nous_client_credentials(force=True):
                             print(f"{self.log_prefix}🔐 Nous agent key refreshed after 401. Retrying request...")
                             continue
+                        # Credential refresh didn't help — show diagnostic info.
+                        # Most common causes: Portal OAuth expired/revoked,
+                        # account out of credits, or agent key blocked.
+                        from hermes_constants import display_hermes_home as _dhh_fn
+                        _dhh = _dhh_fn()
+                        _body_text = ""
+                        try:
+                            _body = getattr(api_error, "body", None) or getattr(api_error, "response", None)
+                            if _body is not None:
+                                _body_text = str(_body)[:200]
+                        except Exception:
+                            pass
+                        print(f"{self.log_prefix}🔐 Nous 401 — Portal authentication failed.")
+                        if _body_text:
+                            print(f"{self.log_prefix}   Response: {_body_text}")
+                        print(f"{self.log_prefix}   Most likely: Portal OAuth expired, account out of credits, or agent key revoked.")
+                        print(f"{self.log_prefix}   Troubleshooting:")
+                        print(f"{self.log_prefix}     • Re-authenticate: hermes login --provider nous")
+                        print(f"{self.log_prefix}     • Check credits / billing: https://portal.nousresearch.com")
+                        print(f"{self.log_prefix}     • Verify stored credentials: {_dhh}/auth.json")
+                        print(f"{self.log_prefix}     • Switch providers temporarily: /model <model> --provider openrouter")
                     if (
                         self.api_mode == "anthropic_messages"
                         and status_code == 401
