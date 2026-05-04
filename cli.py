@@ -100,7 +100,11 @@ _REASONING_TAGS = (
     "thought",
 )
 
-
+#_strip_reasoning_tags 是一个AI 输出清洗函数，专门：
+# 删除 AI 内部思考标签
+# 删除工具调用 / 函数调用标签
+# 处理各种脏数据、截断文本
+# 返回干净、可展示的用户文本
 def _strip_reasoning_tags(text: str) -> str:
     """Remove reasoning/thinking blocks from displayed text.
 
@@ -172,7 +176,7 @@ def _strip_reasoning_tags(text: str) -> str:
     )
     return cleaned.strip()
 
-
+#把各种格式的 AI 回复，统一转成干净的纯文本字符串
 def _assistant_content_as_text(content: Any) -> str:
     if content is None:
         return ""
@@ -910,7 +914,13 @@ def _cleanup_worktree(info: Dict[str, str] = None) -> None:
     _active_worktree = None
     print(f"\033[32m✓ Worktree cleaned up: {wt_path}\033[0m")
 
-
+#============================================================================
+#程序启动时，自动帮你清理旧的聊天会话、删除空数据、给数据库瘦身，保持 Hermes 轻快干净。
+#删除空的幽灵会话（一次性清理）
+#自动清理超过 N 天的旧会话（配置控制）
+#自动执行 VACUUM 瘦身数据库（配置控制）
+#全程静默后台运行，出错也不影响主程序启动。
+#============================================================================
 def _run_state_db_auto_maintenance(session_db) -> None:
     """Call ``SessionDB.maybe_auto_prune_and_vacuum`` using current config.
 
@@ -1204,7 +1214,7 @@ def _rich_text_from_ansi(text: str) -> _RichText:
     """
     return _RichText.from_ansi(text or "")
 
-
+#把带 Markdown 格式的文本，变成干净、无格式的纯文本
 def _strip_markdown_syntax(text: str) -> str:
     """Best-effort markdown marker removal for plain-text display."""
     plain = _rich_text_from_ansi(text or "").plain
@@ -11933,6 +11943,24 @@ def main(
     parsed_skills = _parse_skills_argument(skills)
 
     # Create CLI instance
+    # 1. 模型核心参数
+    # model：指定使用哪个 AI 模型（如 claude-3-5-sonnet、gpt-4o、llama3）
+    # toolsets_list：启用哪些工具
+    # 例如：shell, file_edit, browser, database
+    # provider：指定服务商
+    # openai / anthropic / nous / local
+    # api_key：从环境变量 / 配置文件读取的密钥
+    # base_url：本地模型、代理服务器地址
+    # 2. 运行行为参数
+    # max_turns：最大自动交互轮次（防止无限循环）
+    # verbose：打印详细调试日志
+    # compact：简洁界面模式
+    # resume：启动时恢复上一次对话
+    # checkpoints：自动保存对话存档
+    # pass_session_id：在多进程 / 命令间传递会话
+    # ignore_rules：忽略系统安全 / 操作规则（高级）
+
+    
     cli = HermesCLI(
         model=model,
         toolsets=toolsets_list,
